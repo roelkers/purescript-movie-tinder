@@ -4,7 +4,8 @@ import Prelude
 
 import Affjax (get)
 import Affjax.ResponseFormat (string)
-import Data.Array (find, index, intersect, mapWithIndex, (:))
+import Credits (MovieCredits, cred)
+import Data.Array (find, foldl, index, intersect, mapWithIndex, slice, (:))
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Tuple (Tuple(..), fst, snd)
@@ -15,12 +16,13 @@ import Effect.Aff.Class (liftAff)
 import Effect.Class.Console (log)
 import Effect.Console (logShow)
 import Effect.Exception (throw, throwException)
+import Environment (getApiKey, getRandomInt)
 import Genres (Genre, genres, initialGenre)
 import Movie (Movie, mov)
 import React.Basic.DOM as D
 import React.Basic.DOM.Events (targetValue)
 import React.Basic.Events (handler, handler_)
-import React.Basic.Hooks (type (/\), Component, JSX, ReactComponent, component, element, reactComponent, useState)
+import React.Basic.Hooks (type (/\), Component, JSX, ReactComponent, component, element, reactComponent, unsafeRenderEffect, useEffectOnce, useState)
 import React.Basic.Hooks as R
 import React.Basic.Hooks.Aff (useAff)
 import Simple.JSON (readJSON)
@@ -31,7 +33,6 @@ import Web.HTML.HTMLDocument (body, toNonElementParentNode)
 import Web.HTML.HTMLElement (toElement)
 import Web.HTML.HTMLOptionElement (setSelected)
 import Web.HTML.Window (document)
-import Environment (getApiKey)
 
 mov_nr_decisions :: Int
 mov_nr_decisions = 20
@@ -59,6 +60,20 @@ getMovie2 apiKey id = do
         Left err -> do
           pure mov
         Right (r ::Movie) -> do
+          --log $ "userID is: " <> show r.title
+          pure r
+
+getMovieCredits :: String -> Int -> Aff MovieCredits
+getMovieCredits apiKey id = do
+  res <- get string (baseUrl <> "movie/" <> show id <> "/credits" <> "?api_key=" <> apiKey) 
+  case res of
+    Left err -> do
+      pure cred 
+    Right response -> do 
+      case readJSON response.body of
+        Left err -> do
+          pure cred 
+        Right (r ::MovieCredits) -> do
           --log $ "userID is: " <> show r.title
           pure r
 
@@ -92,7 +107,8 @@ type MkMoviesProps = {
   movies:: Maybe (Array Movie),
   votedYes:: VotesTuple, 
   setVotedYes:: SetState (VotesTuple),
-  setShowVoteResults:: SetState Boolean 
+  setShowVoteResults:: SetState Boolean,
+  apiKey:: String
 } 
 
 setTupleAt :: Int -> VotesTuple -> Array Movie -> VotesTuple
@@ -140,7 +156,13 @@ mkMovieSelection = do
         else
           setStep \i -> i + 1
 
+      getActorString :: Maybe MovieCredits -> String 
+      getActorString credits = foldl (\acc actor -> acc <> actor.name <> ", ") "" ( 
+        slice 0 5 $  _.cast $ fromMaybe cred credits ) 
 
+
+    credits <- useAff movie $ do 
+      getMovieCredits props.apiKey movie.id 
     pure $
       D.div {
       className: "mt-100",
@@ -153,7 +175,17 @@ mkMovieSelection = do
         },
         D.div {
           children: [
-            mkMovie movie,
+            mkMovieOverview movie,
+            D.div {
+              className: "row",
+              children: [
+                D.p {
+                  children: [
+                    D.text $ "With: " <> getActorString credits 
+                  ] 
+                }  
+              ]
+            },
             D.div {
               className: "row",
               children: [
@@ -174,8 +206,8 @@ mkMovieSelection = do
       ]
     }
   
-mkMovie :: Movie -> R.JSX
-mkMovie movie =
+mkMovieOverview :: Movie -> R.JSX
+mkMovieOverview movie =
   D.div {
     children: [
       D.div {
@@ -252,7 +284,7 @@ mkMovieResults = do
           case selectedMovieIndex of 
           Just(i) -> D.div {
             children: [
-              mkMovie selectedMovie,
+              mkMovieOverview selectedMovie, 
               D.button {
                 onClick: handler_ deselectMovie,
                 className: "btn btn-secondary",
@@ -289,8 +321,9 @@ mkMyApp = do
     Tuple genre setGenre <- useState initialGenre 
     Tuple votedYes setVotedYes <- useState (Tuple [] [])
     Tuple showVoteResults setShowVoteResults <- useState false
+    randomInt <- unsafeRenderEffect $ getRandomInt 0 150
     movies <- useAff genre.id $ do
-      discoverMovies apiKey (show genre.id) 1
+      discoverMovies apiKey (show genre.id) randomInt 
     let 
       handleClick :: Effect Unit
       handleClick = do
@@ -326,6 +359,7 @@ mkMyApp = do
             , votedYes:votedYes
             , setVotedYes: setVotedYes 
             , setShowVoteResults: setShowVoteResults
+            , apiKey: apiKey
             }
         ]
       }
@@ -348,6 +382,7 @@ main = do
   doc <- document w
   -- Get "container" element in HTML
   ctr <- body doc 
+  random <- getRandomInt 0 100
   case ctr of
     Nothing -> throw "Container element not found."
     Just c -> do
