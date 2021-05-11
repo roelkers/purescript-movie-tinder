@@ -374,7 +374,6 @@ mkGenre genre =
 
 main :: Effect Unit
 main = do
-  log "Rendering address book component"
   -- Get window object
   apiKey <- getApiKey
   w <- window

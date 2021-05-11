@@ -13,3 +13,7 @@
 dist
 output
 .parcel-cache
+
+# Local Netlify folder
+.netlify
+.cache
